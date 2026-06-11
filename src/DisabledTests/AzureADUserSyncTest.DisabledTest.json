@@ -1,0 +1,6 @@
+{
+    "bug": "637527",
+    "codeunitId": 132928,
+    "codeunitName": "Azure AD User Sync Test",
+    "method": "TestFailedUpdateRecordsErrorMessageOnBuffer"
+}
