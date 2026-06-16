@@ -6,6 +6,8 @@
   "runs-on": "windows-latest",
   "cacheImageName": "",
   "UsePsSession": false,
+  "gitHubRunner": "windows-latest",
+  "githubRunnerShell": "pwsh",
   "artifact": "bcinsider/Sandbox/29.0.51369.0//latest",
   "country": "base",
   "useProjectDependencies": true,
@@ -13,10 +15,14 @@
     "onPush": false,
     "onPull_Request": true,
     "onSchedule": false,
-    "retentionDays": 30,
     "mode": "modifiedApps"
   },
   "repoVersion": "29.0",
+  "numberOfTenantsForTesting": 3,
+  "workspaceCompilation": {
+    "enabled": true,
+    "parallelism": -1
+  },
   "conditionalSettings": [
     {
       "buildModes": [
@@ -29,17 +35,6 @@
           "CLEAN27",
           "CLEAN28",
           "CLEAN29"
-        ]
-      }
-    },
-    {
-      "branches": [
-        "main",
-        "releases/*.x"
-      ],
-      "settings": {
-        "buildModes": [
-          "Clean"
         ]
       }
     }
@@ -120,7 +115,7 @@
   "enablePerTenantExtensionCop": true,
   "enableUICop": true,
   "enableCodeAnalyzersOnTestApps": true,
-  "rulesetFile": "../../../src/rulesets/ruleset.json",
+  "rulesetFile": "../../../src/rulesets/base.ruleset.json",
   "skipUpgrade": true,
   "fullBuildPatterns": [
     "build/*",
@@ -131,7 +126,7 @@
   "PullRequestTrigger": "pull_request",
   "ALDoc": {
     "maxReleases": 0,
-    "continuousDeployment": true,
+    "continuousDeployment": false,
     "groupByProject": false,
     "excludeProjects": [
       "build_projects_System Application Modules"
