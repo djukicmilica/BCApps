@@ -170,9 +170,11 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
 
         InitNamespaceManager(NamespaceMgr, XmlDoc);
 
+        SetCustomizationId(XmlDoc, NamespaceMgr);
         SetFrenchBillingMode(XmlDoc, NamespaceMgr, SourceDocumentLines);
         RemoveZeroAllowanceTotal(XmlDoc, NamespaceMgr);
         InjectSupplierIdentification(XmlDoc, NamespaceMgr, CompanyInformation);
+        InjectBuyerIdentification(XmlDoc, NamespaceMgr, SourceDocumentHeader);
         InjectSupplierEndpoint(XmlDoc, NamespaceMgr, CompanyInformation, EDocumentService.Code);
         InjectRegulatoryComments(XmlDoc, NamespaceMgr, SourceDocumentHeader);
         InjectBillingReference(XmlDoc, NamespaceMgr, SourceDocumentHeader);
@@ -196,6 +198,17 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
     [IntegrationEvent(false, false)]
     local procedure OnAfterInjectFrenchElements(var TempBlob: Codeunit "Temp Blob"; SourceDocumentHeader: RecordRef; var SourceDocumentLines: RecordRef; EDocumentService: Record "E-Document Service")
     begin
+    end;
+
+    local procedure SetCustomizationId(var XmlDoc: XmlDocument; NamespaceMgr: XmlNamespaceManager)
+    var
+        CustomizationIdNode: XmlNode;
+        NewCustomizationIdNode: XmlNode;
+    begin
+        if not XmlDoc.SelectSingleNode('/*/cbc:CustomizationID', NamespaceMgr, CustomizationIdNode) then
+            exit;
+        NewCustomizationIdNode := XmlElement.Create('CustomizationID', CbcNamespaceTok, FranceCustomizationIdTok).AsXmlNode();
+        CustomizationIdNode.ReplaceWith(NewCustomizationIdNode);
     end;
 
     local procedure SetFrenchBillingMode(var XmlDoc: XmlDocument; NamespaceMgr: XmlNamespaceManager; var SourceDocumentLines: RecordRef)
@@ -366,6 +379,7 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
         OrderLineReferenceElement: XmlElement;
         OrderReferenceElement: XmlElement;
         DeliveryElement: XmlElement;
+        BuyerReference: Text;
         LineXPath: Text;
         ShipmentPostingDate: Date;
     begin
@@ -375,11 +389,12 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
         if not InvoiceLineNode.SelectSingleNode('cac:AllowanceCharge | cac:TaxTotal | cac:WithholdingTaxTotal | cac:Item', NamespaceMgr, LineContentAnchorNode) then
             exit;
 
-        if SalesInvoiceLine."Order No." <> '' then begin
+        BuyerReference := GetExtendedLineBuyerReference(SalesInvoiceLine);
+        if (SalesInvoiceLine."Order No." <> '') and (BuyerReference <> '') then begin
             OrderLineReferenceElement := XmlElement.Create('OrderLineReference', CacNamespaceTok);
             OrderLineReferenceElement.Add(XmlElement.Create('LineID', CbcNamespaceTok, Format(SalesInvoiceLine."Order Line No.", 0, 9)));
             OrderReferenceElement := XmlElement.Create('OrderReference', CacNamespaceTok);
-            OrderReferenceElement.Add(XmlElement.Create('ID', CbcNamespaceTok, SalesInvoiceLine."Order No."));
+            OrderReferenceElement.Add(XmlElement.Create('ID', CbcNamespaceTok, BuyerReference));
             OrderLineReferenceElement.Add(OrderReferenceElement);
             LineContentAnchorNode.AddBeforeSelf(OrderLineReferenceElement);
         end;
@@ -396,12 +411,34 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
         LineContentAnchorNode.AddBeforeSelf(DeliveryElement);
     end;
 
+    local procedure GetExtendedLineBuyerReference(SalesInvoiceLine: Record "Sales Invoice Line") BuyerReference: Text
+    var
+        SalesShipmentHeader: Record "Sales Shipment Header";
+    begin
+        if SalesInvoiceLine."Shipment No." <> '' then begin
+            SalesShipmentHeader.SetLoadFields("Your Reference", "External Document No.");
+            if SalesShipmentHeader.Get(SalesInvoiceLine."Shipment No.") then begin
+                BuyerReference := SalesShipmentHeader."Your Reference";
+                if BuyerReference = '' then
+                    BuyerReference := SalesShipmentHeader."External Document No.";
+            end;
+        end;
+
+        OnAfterGetExtendedLineBuyerReference(SalesInvoiceLine, BuyerReference);
+    end;
+
+    [IntegrationEvent(false, false)]
+    local procedure OnAfterGetExtendedLineBuyerReference(SalesInvoiceLine: Record "Sales Invoice Line"; var BuyerReference: Text)
+    begin
+    end;
+
     local procedure InjectRegulatoryComments(var XmlDoc: XmlDocument; NamespaceMgr: XmlNamespaceManager; SourceDocumentHeader: RecordRef)
     var
         SalesCommentLine: Record "Sales Comment Line";
         AnchorNode: XmlNode;
         DocumentNo: Code[20];
         DocumentType: Enum "Sales Comment Document Type";
+        RegulatoryComment: Text;
         RegulatoryCommentTypeCode: Text;
     begin
         case SourceDocumentHeader.Number of
@@ -433,11 +470,14 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
             SalesCommentLine.SetRange("Document Type", DocumentType);
             SalesCommentLine.SetRange("No.", DocumentNo);
             SalesCommentLine.SetFilter("FR Regulatory Comment Type", '<>%1', SalesCommentLine."FR Regulatory Comment Type"::None);
-            SalesCommentLine.SetLoadFields("FR Regulatory Comment Type", Comment);
+            SalesCommentLine.SetLoadFields("FR Regulatory Comment Type", "FR Regulatory Comment", Comment);
             if SalesCommentLine.FindSet() then
                 repeat
                     RegulatoryCommentTypeCode := GetRegulatoryCommentTypeCode(SalesCommentLine."FR Regulatory Comment Type");
-                    AddRegulatoryComment(AnchorNode, RegulatoryCommentTypeCode, SalesCommentLine.Comment);
+                    RegulatoryComment := SalesCommentLine."FR Regulatory Comment";
+                    if RegulatoryComment = '' then
+                        RegulatoryComment := SalesCommentLine.Comment;
+                    AddRegulatoryComment(AnchorNode, RegulatoryCommentTypeCode, RegulatoryComment);
                 until SalesCommentLine.Next() = 0;
         end;
     end;
@@ -543,6 +583,36 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
         SIRENNo := GetSIRENNo(CompanyInformation."Registration No.", CompanyInformation."SIRET No.");
         if SIRENNo <> '' then
             InjectLegalEntitySIREN(PartyNode, NamespaceMgr, CopyStr(SIRENNo, 1, 20));
+    end;
+
+    local procedure InjectBuyerIdentification(var XmlDoc: XmlDocument; NamespaceMgr: XmlNamespaceManager; SourceDocumentHeader: RecordRef)
+    var
+        Customer: Record Customer;
+        FRCIIXMLBuilder: Codeunit "CII XML Builder";
+        CustomerNoFieldRef: FieldRef;
+        BuyerPartyNode: XmlNode;
+        SIRENNo: Text;
+        VATRegistrationNo: Text;
+    begin
+        if not XmlDoc.SelectSingleNode('//cac:AccountingCustomerParty/cac:Party', NamespaceMgr, BuyerPartyNode) then
+            exit;
+        if not FRCIIXMLBuilder.TryGetCustomerNoFieldRef(SourceDocumentHeader, CustomerNoFieldRef) then
+            exit;
+        if not Customer.Get(CustomerNoFieldRef.Value()) then
+            exit;
+
+        SIRENNo := GetSIRENNo(Customer."Registration Number", Customer."Registration Number");
+        if SIRENNo = '' then
+            if IsNumericIdentifier(CopyStr(Customer."FR Electronic Address", 1, 9), 9) then
+                SIRENNo := CopyStr(Customer."FR Electronic Address", 1, 9);
+        if SIRENNo = '' then begin
+            VATRegistrationNo := DelChr(Customer."VAT Registration No.", '=', ' ');
+            if (StrLen(VATRegistrationNo) = 13) and (CopyStr(VATRegistrationNo, 1, 2).ToUpper() = 'FR') then
+                if IsNumericIdentifier(CopyStr(VATRegistrationNo, 5, 9), 9) then
+                    SIRENNo := CopyStr(VATRegistrationNo, 5, 9);
+        end;
+        if SIRENNo <> '' then
+            InjectLegalEntitySIREN(BuyerPartyNode, NamespaceMgr, CopyStr(SIRENNo, 1, 20));
     end;
 
     local procedure GetSIRENNo(RegistrationNo: Text; SIRETNo: Text): Text
@@ -663,18 +733,19 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
         if CustomerNo = '' then
             exit(false);
 
-        if GetServiceParticipantAddress(EDocumentServiceCode, Enum::"E-Document Source Type"::Customer, CustomerNo, ElecAddress, ElecAddressScheme) then begin
-            ElecAddressScheme := ElecAddressScheme::"0225";
+        if GetServiceParticipantAddress(EDocumentServiceCode, Enum::"E-Document Source Type"::Customer, CustomerNo, ElecAddress, ElecAddressScheme) then
             exit(true);
-        end;
 
-        Customer.SetLoadFields("FR Electronic Address", "Registration Number", "VAT Registration No.");
+        Customer.SetLoadFields("FR Electronic Address", "FR Elec. Address Scheme", "Registration Number", "VAT Registration No.");
         if not Customer.Get(CustomerNo) then
             exit(false);
 
         if not FREDocHelpers.GetBuyerElectronicAddress(Customer, ElecAddress) then
             exit(false);
-        ElecAddressScheme := ElecAddressScheme::"0225";
+        if (Customer."FR Electronic Address" <> '') and (Customer."FR Elec. Address Scheme" <> Customer."FR Elec. Address Scheme"::" ") then
+            ElecAddressScheme := Customer."FR Elec. Address Scheme"
+        else
+            ElecAddressScheme := ElecAddressScheme::"0225";
         exit(true);
     end;
 
@@ -781,7 +852,8 @@ codeunit 10977 "Peppol BIS 3.0 FR Format" implements "E-Document"
     var
         CbcNamespaceTok: Label 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2', Locked = true;
         CacNamespaceTok: Label 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2', Locked = true;
-        ExtendedCTCFranceCustomizationIdTok: Label 'EXTENDED-CTC-FR', Locked = true;
+        FranceCustomizationIdTok: Label 'urn:cen.eu:en16931:2017', Locked = true;
+        ExtendedCTCFranceCustomizationIdTok: Label 'urn:cen.eu:en16931:2017#conformant#urn.cpro.gouv.fr:1p0:extended-ctc-fr', Locked = true;
         RegulatoryCommentFormatTok: Label '#%1#%2', Comment = '%1 = Regulatory comment type, %2 = Comment text', Locked = true;
         BillingModeB1Tok: Label 'B1', Locked = true;
         BillingModeS1Tok: Label 'S1', Locked = true;

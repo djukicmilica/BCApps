@@ -12,6 +12,10 @@ pageextension 10975 "FR Sales Comment Sheet" extends "Sales Comment Sheet"
     {
         addafter(Comment)
         {
+            field("FR Regulatory Comment"; Rec."FR Regulatory Comment")
+            {
+                ApplicationArea = Comments;
+            }
             field("FR Regulatory Comment Type"; Rec."FR Regulatory Comment Type")
             {
                 ApplicationArea = Comments;
